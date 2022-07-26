@@ -138,19 +138,31 @@ def load_latent_data(
         epochs=epochs,
         shard_size=shard_size,  # TODO
     )
-    for batch, model_kwargs, text in data:
+
+    for batch, text in data:
+        batch = batch.to(dist_util.dev())
+        model_kwargs = {}
 
         text = list(text)
         for i in range(len(text)):
             if random.randint(0, 100) < 20:
                 text[i] = ""
 
-        text_emb = bert.encode(text).to(dist_util.dev()).half()
+        text_emb = bert.encode(text).to(dist_util.dev())
 
-        model_kwargs["context"] = text_emb
+        clip_text = clip.tokenize(text, truncate=True).to(dist_util.dev())
+        clip_emb = clip_model.encode_text(clip_text)
+
+        model_kwargs["context"] = text_emb.float()
+        model_kwargs["clip_embed"] = clip_emb.float()
 
         batch = batch.to(dist_util.dev())
-        emb = encoder.encode(batch).sample().half()
+        encoder_input = batch.half() if use_fp16 else batch.float()
+        emb = encoder.encode(encoder_input).sample()
+        if use_fp16:
+            emb = emb.half()
+        else:
+            emb = emb.float()
         emb *= 0.18215
 
         yield emb, model_kwargs
