@@ -70,13 +70,18 @@ def main():
     logger.log("training...")
     TrainLoop(
         model=model,
+        bert=bert,
         diffusion=diffusion,
+        diffusion_config=diffusion_config,
+        kl_model=encoder,
+        clip_model=clip_model,
         data=data,
         batch_size=args.batch_size,
         microbatch=args.microbatch,
         lr=args.lr,
         ema_rate=args.ema_rate,
         log_interval=args.log_interval,
+        sample_interval=args.sample_interval,
         save_interval=args.save_interval,
         resume_checkpoint=args.resume_checkpoint,
         use_fp16=args.use_fp16,
