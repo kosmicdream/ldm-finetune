@@ -28,6 +28,15 @@ def main():
     dist_util.setup_dist()
     logger.configure()
 
+    from dist.clip_custom import clip # make clip end up on the right device
+
+    logger.log("loading clip...")
+    clip_model, _ = clip.load('ViT-L/14', device=dist_util.dev(), jit=False)
+    clip_model.eval().requires_grad_(False)
+    set_requires_grad(clip_model, False)
+
+    del clip_model.visual
+
     logger.log("loading vae...")
 
     encoder = torch.load(args.kl_model, map_location="cpu")
@@ -48,9 +57,10 @@ def main():
     bert.eval()
     set_requires_grad(bert, False)
 
+    diffusion_config = model_and_diffusion_defaults()
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
-        **args_to_dict(args, model_and_diffusion_defaults().keys())
+        **args_to_dict(args, diffusion_config.keys())
     )
 
     model.to(dist_util.dev())
@@ -61,12 +71,21 @@ def main():
 
     logger.log("creating data loader...")
     data = load_latent_data(
-        encoder,
-        bert,
+        encoder=encoder,
+        bert=bert,
+        clip_model=clip_model,
+        clip=clip,
         data_dir=args.data_dir,
         batch_size=args.batch_size,
-        image_size=args.image_size,
+        epochs=args.epochs,
+        shard_size=args.shard_size,
+        image_key=args.image_key,
+        caption_key=args.caption_key,
+        cache_dir=args.cache_dir,
+        random_crop=args.random_crop,
+        random_flip=args.random_flip,
     )
+
     logger.log("training...")
     TrainLoop(
         model=model,
@@ -92,12 +111,32 @@ def main():
     ).run_loop()
 
 
-def load_latent_data(encoder, bert, data_dir, batch_size, image_size):
+def load_latent_data(
+    encoder=None,
+    bert=None,
+    clip_model=None,
+    clip=None,
+    data_dir=None,
+    batch_size=None,
+    epochs=20,
+    shard_size=10000,
+    image_key="jpg",
+    caption_key="txt",
+    cache_dir="cache",
+    random_crop=False,
+    random_flip=False,
+    use_fp16=False,
+):
     data = load_data(
         data_dir=data_dir,
         batch_size=batch_size,
-        image_size=256,
-        class_cond=False,
+        random_crop=random_crop,
+        random_flip=random_flip,
+        image_key=image_key,
+        caption_key=caption_key,
+        cache_dir=cache_dir,
+        epochs=epochs,
+        shard_size=shard_size,  # TODO
     )
     for batch, model_kwargs, text in data:
 
@@ -129,11 +168,19 @@ def create_argparser():
         ema_rate="0.9999",  # comma-separated list of EMA values
         log_interval=10,
         save_interval=10000,
+        sample_interval=100,
         resume_checkpoint="",
         use_fp16=False,
         fp16_scale_growth=1e-3,
         kl_model=None,
         bert_model=None,
+        epochs=20,
+        shard_size=10000,
+        image_key="jpg",
+        caption_key="txt",
+        cache_dir="cache",
+        random_crop=False,
+        random_flip=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
